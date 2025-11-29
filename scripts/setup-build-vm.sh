@@ -41,13 +41,28 @@ config:
     package_upgrade: true
     packages:
     - git
-    - snapd
+    - ca-certificates
+    - curl
+    - gnupg
     - unattended-upgrades
     runcmd:
     - systemctl enable unattended-upgrades
     - systemctl start unattended-upgrades
-    - export PATH=$PATH:/snap/bin
-    - snap install --classic distrobuilder
+    # Add Zabbly repository for Incus tools
+    - mkdir -p /etc/apt/keyrings
+    - curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+    - |
+      cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+      Enabled: yes
+      Types: deb
+      URIs: https://pkgs.zabbly.com/incus/stable
+      Suites: $(. /etc/os-release && echo ${VERSION_CODENAME})
+      Components: main
+      Architectures: $(dpkg --print-architecture)
+      Signed-By: /etc/apt/keyrings/zabbly.asc
+      EOF
+    - apt-get update
+    - apt-get install -y incus-extra
 EOF
 
 # Wait for VM to be ready
