@@ -17,6 +17,7 @@ packages:
   sets:
     - packages:
         - nginx
+        - openrc
         - ca-certificates
         - curl
         - tzdata
