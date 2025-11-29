@@ -48,10 +48,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install distrobuilder
+      - name: Install build dependencies
         run: |
           sudo snap install distrobuilder --classic
-          sudo snap install incus-simplestreams --classic
+
+      - name: Install incus-simplestreams
+        run: |
+          # incus-simplestreams is available from GitHub releases
+          wget https://github.com/canonical/lxd-imagebuilder/releases/latest/download/incus-simplestreams.linux.amd64 -O /tmp/incus-simplestreams
+          sudo install -m 755 /tmp/incus-simplestreams /usr/local/bin/incus-simplestreams
 
       - name: Build appliance
         run: |
