@@ -85,9 +85,12 @@ echo "==> Adding to SimpleStreams registry..."
 mkdir -p "$REGISTRY_DIR"
 
 # Use incus-simplestreams to add the image
+# The command must be run from the registry directory
 # The alias format follows: name/arch or just name
-sudo incus-simplestreams add "$REGISTRY_DIR" \
-  incus.tar.xz rootfs.squashfs \
+cd "$REGISTRY_DIR"
+sudo incus-simplestreams add \
+  "$BUILD_DIR/incus.tar.xz" \
+  "$BUILD_DIR/rootfs.squashfs" \
   --alias "${APPLIANCE}" \
   --alias "${APPLIANCE}/${ARCH}"
 
