@@ -52,7 +52,7 @@ config:
     - mkdir -p /etc/apt/keyrings
     - curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
     - |
-      cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+      cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<'ZABBLY_EOF'
       Enabled: yes
       Types: deb
       URIs: https://pkgs.zabbly.com/incus/stable
@@ -60,7 +60,7 @@ config:
       Components: main
       Architectures: $(dpkg --print-architecture)
       Signed-By: /etc/apt/keyrings/zabbly.asc
-      EOF
+      ZABBLY_EOF
     - apt-get update
     - apt-get install -y incus-extra
 EOF
