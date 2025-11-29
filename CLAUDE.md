@@ -315,10 +315,83 @@ The build script normalizes architecture names:
 
 ## Shell Script Standards
 
-All scripts in `scripts/` follow these conventions:
+All scripts in `bin/` and `scripts/` follow these conventions:
 - Shebang: `#!/usr/bin/env bash`
 - Safety: `set -euo pipefail`
 - Usage: Include usage message when arguments are missing
 - Variables: Use `${VAR}` syntax, validate required args with `${VAR:?message}`
 - Errors: Echo to stderr and exit with non-zero code
 - Paths: Use `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` for script directory
+
+## Development Workflow (GitHub Flow)
+
+This project uses **GitHub Flow** for all changes:
+
+### Making Changes
+
+1. **Create a feature branch** from `main`:
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout -b feature/my-feature
+   ```
+
+2. **Make your changes** and commit regularly:
+   ```bash
+   git add .
+   git commit -m "Description of changes"
+   ```
+
+3. **Push your branch** to GitHub:
+   ```bash
+   git push -u origin feature/my-feature
+   ```
+
+4. **Create a Pull Request** on GitHub:
+   - Go to the repository on GitHub
+   - Click "Pull requests" → "New pull request"
+   - Select your feature branch
+   - Fill in the PR description
+   - Request review if needed
+
+5. **CI checks must pass**:
+   - Template validation
+   - Shell script linting (shellcheck)
+   - Build test (nginx appliance)
+
+6. **Merge to main**:
+   - Use "Squash and merge" to keep history clean
+   - Delete the feature branch after merging
+
+### Branch Naming Conventions
+
+- `feature/` - New features or enhancements
+- `fix/` - Bug fixes
+- `docs/` - Documentation updates
+- `refactor/` - Code refactoring
+- `test/` - Test additions or improvements
+
+### Commit Message Guidelines
+
+- Use imperative mood ("Add feature" not "Added feature")
+- Keep first line under 72 characters
+- Reference issues/PRs when applicable
+- Be descriptive but concise
+
+### Examples
+
+```bash
+# Add a new appliance
+git checkout -b feature/postgres-appliance
+# ... make changes ...
+git commit -m "Add PostgreSQL appliance with replication support"
+git push -u origin feature/postgres-appliance
+# Create PR on GitHub
+
+# Fix a bug
+git checkout -b fix/nginx-permissions
+# ... make changes ...
+git commit -m "Fix nginx log directory permissions"
+git push -u origin fix/nginx-permissions
+# Create PR on GitHub
+```
