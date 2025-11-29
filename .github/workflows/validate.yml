@@ -51,6 +51,7 @@ jobs:
       - name: Install distrobuilder
         run: |
           sudo snap install distrobuilder --classic
+          sudo snap install incus-simplestreams --classic
 
       - name: Build appliance
         run: |
