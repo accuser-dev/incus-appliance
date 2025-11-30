@@ -108,8 +108,8 @@ incus launch myregistry:nginx my-nginx
 ```
 
 **What gets published:**
-- **GitHub Pages** — SimpleStreams JSON files (index.json, images.json) + landing page
-- **GitHub Releases** — Actual image files (incus.tar.xz, rootfs.squashfs)
+- **GitHub Pages** — Complete SimpleStreams registry (JSON metadata + image files) + landing page
+- **GitHub Releases** — Backup copies of image files (for direct download)
 
 #### Option 2: Manual Publishing to Your Own Server
 
@@ -173,11 +173,17 @@ Incus client fetches and launches
     - `README.md` — User documentation
     - `profiles/` — Optional Incus profiles
 
-- **`scripts/`** — Build, test, and deployment automation
-  - `build-appliance.sh` — Core build script
-  - `serve-local.sh` — Local test server
+- **`bin/`** — Core build and test scripts (run inside VM or on bare metal)
+  - `build-appliance.sh` — Build single appliance
+  - `build-all.sh` — Build all appliances
   - `validate.sh` — Template validation
   - `test-appliance.sh` — Integration testing
+
+- **`scripts/`** — Host orchestration and deployment
+  - `serve-local.sh` — Local test server
+  - `setup-build-vm.sh` — Create build VM
+  - `build-remote.sh` — Build using VM
+  - `publish.sh` — Deploy to production
 
 - **`registry/`** — Generated SimpleStreams registry (gitignored)
   - `streams/v1/index.json` — Entry point
