@@ -45,6 +45,12 @@ jobs:
           # Ensure distrobuilder can write to cache (runs as root)
           sudo chown -R root:root .cache/distrobuilder 2>/dev/null || true
 
+      - name: Set up QEMU for cross-architecture builds
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.arch }}
+
       - name: Install build dependencies
         run: |
           # Add Zabbly repository for Incus tools
