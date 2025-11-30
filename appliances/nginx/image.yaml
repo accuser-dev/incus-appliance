@@ -1,28 +1,37 @@
 # image.yaml - Distrobuilder template for nginx appliance
+# Base: Debian Bookworm with cloud-init support
 image:
-  distribution: alpine
-  release: "3.20"
-  description: "Nginx reverse proxy appliance"
+  distribution: debian
+  release: bookworm
+  description: "Nginx reverse proxy and web server appliance"
 
 source:
-  downloader: rootfs-http
-  url: https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
-  keys:
-    - 0482D84022F52DF1C4E7CD43293ACD0907D9495A
+  downloader: debootstrap
+  url: http://deb.debian.org/debian
 
 packages:
-  manager: apk
+  manager: apt
   update: true
   cleanup: true
   sets:
     - packages:
-        - nginx
-        - openrc
-        - ifupdown-ng
+        # Base system
         - ca-certificates
         - curl
+        - gnupg
         - tzdata
         - logrotate
+        # cloud-init for last-mile configuration
+        - cloud-init
+        # systemd for service management
+        - systemd
+        - systemd-sysv
+        - dbus
+        # Networking
+        - iproute2
+        - iputils-ping
+        # Nginx
+        - nginx
       action: install
 
 files:
@@ -41,16 +50,6 @@ files:
     source: files/index.html
     mode: "0644"
 
-  - path: /etc/network/interfaces
-    generator: dump
-    content: |-
-      auto lo
-      iface lo inet loopback
-
-      auto eth0
-      iface eth0 inet dhcp
-    mode: "0644"
-
   - path: /etc/motd
     generator: dump
     content: |-
@@ -60,8 +59,11 @@ files:
       ╠══════════════════════════════════════════╣
       ║  Config: /etc/nginx/conf.d/              ║
       ║  Logs:   /var/log/nginx/                 ║
-      ║  Status: nginx -t && nginx -s reload     ║
+      ║  Status: nginx -t && systemctl reload nginx
       ╚══════════════════════════════════════════╝
+
+      Supports cloud-init for automated configuration.
+      See: incus config set <instance> cloud-init.user-data ...
     mode: "0644"
 
   - path: /etc/logrotate.d/nginx
@@ -74,12 +76,22 @@ files:
           compress
           delaycompress
           notifempty
-          create 0640 nginx nginx
+          create 0640 www-data adm
           sharedscripts
           postrotate
-              /usr/sbin/nginx -s reopen
+              systemctl reload nginx > /dev/null 2>&1 || true
           endscript
       }
+    mode: "0644"
+
+  - path: /etc/cloud/cloud.cfg.d/99-incus.cfg
+    generator: dump
+    content: |-
+      # Incus/LXD datasource configuration
+      datasource_list: [LXD]
+      datasource:
+        LXD:
+          apply_network_config: true
     mode: "0644"
 
 actions:
@@ -99,10 +111,17 @@ actions:
       set -eux
 
       # Enable nginx at boot
-      rc-update add nginx default
+      systemctl enable nginx
 
-      # Create nginx user if not exists
-      adduser -D -H -s /sbin/nologin nginx 2>/dev/null || true
+      # Enable cloud-init services
+      systemctl enable cloud-init-local.service
+      systemctl enable cloud-init.service
+      systemctl enable cloud-config.service
+      systemctl enable cloud-final.service
+
+      # Disable unnecessary services for containers
+      systemctl disable apt-daily.timer || true
+      systemctl disable apt-daily-upgrade.timer || true
 
   - trigger: post-files
     action: |-
@@ -112,11 +131,23 @@ actions:
       # Ensure nginx runtime directory exists for config test
       mkdir -p /run/nginx
 
+      # Update nginx.conf to use www-data user (Debian default)
+      sed -i 's/^user nginx;/user www-data;/' /etc/nginx/nginx.conf
+
+      # Update PID path for Debian
+      sed -i 's|/run/nginx/nginx.pid|/run/nginx.pid|' /etc/nginx/nginx.conf
+
       # Validate nginx configuration
       nginx -t
 
       # Set permissions
-      chown -R nginx:nginx /var/log/nginx
-      chown -R nginx:nginx /var/cache/nginx
+      chown -R www-data:www-data /var/log/nginx
+      chown -R www-data:www-data /var/cache/nginx
       chown -R root:root /etc/nginx
       chmod -R 755 /usr/share/nginx/html
+
+      # Clean up package cache
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+      rm -rf /tmp/*
+      rm -rf /var/tmp/*
