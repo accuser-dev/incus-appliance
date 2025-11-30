@@ -1,7 +1,7 @@
 # appliance.yaml - Appliance metadata
 name: nginx
-version: "1.0.0"
-description: "Lightweight reverse proxy and web server appliance"
+version: "2.0.0"
+description: "Reverse proxy and web server appliance with cloud-init support"
 maintainer: "Incus Appliance Registry"
 
 # Supported architectures
@@ -15,8 +15,11 @@ types:
 
 # Base distribution
 base:
-  distribution: alpine
-  release: "3.20"
+  distribution: debian
+  release: bookworm
+
+# cloud-init support
+cloud_init: true
 
 # Resource requirements (informational)
 requirements:
