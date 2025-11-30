@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'appliances/**'
+      - 'appliances.yaml'
       - 'bin/**'
       - '.github/workflows/build-and-publish.yml'
   workflow_dispatch:
@@ -16,12 +17,54 @@ permissions:
   id-token: write
 
 jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      appliances: ${{ steps.set-matrix.outputs.appliances }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Generate build matrix
+        id: set-matrix
+        run: |
+          # Read defaults
+          DEFAULT_ARCHS=$(yq -o=json '.defaults.architectures // ["amd64", "arm64"]' appliances.yaml)
+
+          # Generate matrix includes
+          MATRIX_INCLUDES=$(yq -o=json '
+            .appliances[] |
+            select(.enabled != false) |
+            {
+              "appliance": .name,
+              "archs": (.architectures // ["amd64", "arm64"])
+            }
+          ' appliances.yaml | jq -s '[.[] | .archs[] as $arch | {appliance: .appliance, arch: $arch}]')
+
+          # Create the matrix object
+          MATRIX=$(echo "$MATRIX_INCLUDES" | jq -c '{include: .}')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+          # Also output just the appliance names for other jobs
+          APPLIANCES=$(yq -o=json '[.appliances[] | select(.enabled != false) | .name]' appliances.yaml | jq -c '.')
+          echo "appliances=$APPLIANCES" >> $GITHUB_OUTPUT
+
+          # Debug output
+          echo "Generated matrix:"
+          echo "$MATRIX" | jq .
+          echo "Appliances: $APPLIANCES"
+
   build:
+    needs: generate-matrix
     runs-on: ubuntu-24.04
     strategy:
-      matrix:
-        appliance: [nginx]  # Add more appliances as they're created
-        arch: [amd64, arm64]
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
       fail-fast: false
 
     steps:
@@ -120,12 +163,17 @@ jobs:
           retention-days: 1
 
   release:
-    needs: build
+    needs: [generate-matrix, build]
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
 
       - name: Download all image artifacts
         uses: actions/download-artifact@v4
@@ -138,6 +186,16 @@ jobs:
         run: |
           echo "==> Downloaded files for release:"
           ls -lh release-files/
+
+      - name: Generate appliance list for release notes
+        id: appliance-list
+        run: |
+          # Generate markdown list of appliances from manifest
+          LIST=$(yq '.appliances[] | select(.enabled != false) | "- " + .name + " (" + ((.architectures // ["amd64", "arm64"]) | join(", ")) + ")"' appliances.yaml)
+          # Use delimiter for multiline output
+          echo "list<<EOF" >> $GITHUB_OUTPUT
+          echo "$LIST" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create/Update Release
         uses: softprops/action-gh-release@v2
@@ -164,15 +222,15 @@ jobs:
 
             Launch an appliance:
             ```bash
-            incus launch appliance:nginx my-nginx
+            incus launch appliance:<name> my-instance
             ```
 
             ### Available Appliances
 
-            - nginx (amd64, arm64)
+            ${{ steps.appliance-list.outputs.list }}
 
   publish:
-    needs: build
+    needs: [generate-matrix, build]
     runs-on: ubuntu-24.04
 
     steps:
@@ -180,7 +238,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
 
       - name: Download all registry artifacts
         uses: actions/download-artifact@v4
@@ -229,9 +290,12 @@ jobs:
           echo "==> Merged registry contents:"
           find merged-registry -type f
 
-      - name: Create index.html
+      - name: Generate index.html from manifest
         run: |
-          cat > merged-registry/index.html <<'EOF'
+          # Generate appliance list HTML
+          APPLIANCE_HTML=$(yq '.appliances[] | select(.enabled != false) | "<li><strong>" + .name + "</strong> - " + (.description // "Appliance") + " (" + ((.architectures // ["amd64", "arm64"]) | join(", ")) + ")</li>"' appliances.yaml)
+
+          cat > merged-registry/index.html <<EOF
           <!DOCTYPE html>
           <html>
           <head>
@@ -240,6 +304,7 @@ jobs:
               body { font-family: system-ui; max-width: 800px; margin: 40px auto; padding: 0 20px; }
               code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
               pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+              li { margin: 8px 0; }
             </style>
           </head>
           <body>
@@ -247,14 +312,12 @@ jobs:
             <p>SimpleStreams image server for pre-configured Incus system containers.</p>
 
             <h2>Quick Start</h2>
-            <pre><code>
-              incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams
-              incus launch appliance:nginx my-nginx
-            </code></pre>
+            <pre><code>incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams
+          incus launch appliance:nginx my-nginx</code></pre>
 
             <h2>Available Appliances</h2>
             <ul>
-              <li>nginx - Reverse proxy and web server (Alpine 3.20, amd64/arm64, ~50MB)</li>
+          ${APPLIANCE_HTML}
             </ul>
 
             <h2>Documentation</h2>
@@ -278,11 +341,19 @@ jobs:
         uses: actions/deploy-pages@v4
 
   summary:
-    needs: [release, publish]
+    needs: [generate-matrix, release, publish]
     runs-on: ubuntu-24.04
     if: success()
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
       - name: Create summary
         run: |
           echo "## ✅ Registry published successfully!" >> $GITHUB_STEP_SUMMARY
@@ -296,5 +367,8 @@ jobs:
           echo "incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Launch an appliance" >> $GITHUB_STEP_SUMMARY
-          echo "incus launch appliance:nginx my-nginx" >> $GITHUB_STEP_SUMMARY
+          echo "incus launch appliance:<name> my-instance" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Built Appliances" >> $GITHUB_STEP_SUMMARY
+          yq '.appliances[] | select(.enabled != false) | "- **" + .name + "** (" + ((.architectures // ["amd64", "arm64"]) | join(", ")) + ")"' appliances.yaml >> $GITHUB_STEP_SUMMARY
