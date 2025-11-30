@@ -1,0 +1,16 @@
+# Appliance Registry Manifest
+# This file defines which appliances are built and published.
+# The CI/CD workflow reads this file to generate the build matrix.
+
+# Default settings applied to all appliances unless overridden
+defaults:
+  architectures:
+    - amd64
+    - arm64
+  enabled: true
+
+# List of appliances to build
+appliances:
+  - name: nginx
+    description: High-performance web server and reverse proxy
+    # Uses defaults: enabled=true, architectures=[amd64, arm64]
