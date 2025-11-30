@@ -220,8 +220,10 @@ jobs:
             <p>SimpleStreams image server for pre-configured Incus system containers.</p>
 
             <h2>Quick Start</h2>
-            <pre><code>incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams
-          incus launch appliance:nginx my-nginx</code></pre>
+            <pre><code>
+              incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams
+              incus launch appliance:nginx my-nginx
+            </code></pre>
 
             <h2>Available Appliances</h2>
             <ul>
