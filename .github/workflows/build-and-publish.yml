@@ -202,47 +202,6 @@ jobs:
           echo "==> Merged registry contents:"
           find merged-registry -type f
 
-      - name: Rewrite URLs to point to GitHub Releases
-        env:
-          GITHUB_REPO: ${{ github.repository }}
-        run: |
-          IMAGES_JSON="merged-registry/streams/v1/images.json"
-
-          if [ -f "$IMAGES_JSON" ]; then
-            # Backup original
-            cp "$IMAGES_JSON" "${IMAGES_JSON}.bak"
-
-            # Rewrite paths to point to GitHub release assets
-            # Original paths: "images/FINGERPRINT/incus.tar.xz" or "images/FINGERPRINT/rootfs.squashfs"
-            # Target paths: "APPLIANCE-ARCH-incus.tar.xz" or "APPLIANCE-ARCH-rootfs.squashfs"
-
-            BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/latest"
-
-            # Extract appliance name from aliases (first alias without a slash, e.g., "nginx")
-            # Product structure: products -> {key} -> aliases, arch, versions -> items
-            jq --arg base_url "$BASE_URL" '
-              .products |= with_entries(
-                (.value.aliases | split(",") | map(select(contains("/") | not)) | .[0]) as $appliance |
-                .value.arch as $arch |
-                .value.versions |= with_entries(
-                  .value.items |= with_entries(
-                    if .value.ftype == "incus.tar.xz" then
-                      .value.path = ($base_url + "/" + $appliance + "-" + $arch + "-incus.tar.xz")
-                    elif .value.ftype == "squashfs" then
-                      .value.path = ($base_url + "/" + $appliance + "-" + $arch + "-rootfs.squashfs")
-                    else
-                      .
-                    end
-                  )
-                )
-              )
-            ' "${IMAGES_JSON}.bak" > "$IMAGES_JSON"
-
-            echo "==> Registry URLs updated"
-            echo "Sample paths:"
-            jq -r '.. | .path? // empty' "$IMAGES_JSON" | head -5
-          fi
-
       - name: Create index.html
         run: |
           cat > merged-registry/index.html <<'EOF'
