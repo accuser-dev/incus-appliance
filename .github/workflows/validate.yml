@@ -82,6 +82,6 @@ jobs:
 
       - name: List registry contents
         run: |
-          cd registry && sudo incus-simplestreams list . || echo "Registry listing not available"
+          cd registry && sudo incus-simplestreams list || echo "Registry listing not available"
           ls -lah registry/
           find registry -type f -ls
