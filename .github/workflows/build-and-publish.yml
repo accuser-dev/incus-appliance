@@ -308,20 +308,6 @@ jobs:
           echo "==> Downloaded artifacts:"
           ls -la registries/
 
-          # Initialize index.json
-          cat > merged-registry/streams/v1/index.json <<'INDEXEOF'
-          {
-            "index": {
-              "images": {
-                "datatype": "image-downloads",
-                "path": "streams/v1/images.json",
-                "format": "products:1.0"
-              }
-            },
-            "format": "index:1.0"
-          }
-          INDEXEOF
-
           # Initialize empty images.json with base structure
           echo '{"content_id": "images", "datatype": "image-downloads", "format": "products:1.0", "products": {}}' > merged-registry/streams/v1/images.json
 
@@ -354,10 +340,29 @@ jobs:
             fi
           done
 
+          # Generate index.json with products array (required by Incus simplestreams client)
+          # The products array must list all product keys from images.json
+          PRODUCTS_ARRAY=$(jq -c '.products | keys' merged-registry/streams/v1/images.json)
+          cat > merged-registry/streams/v1/index.json <<INDEXEOF
+          {
+            "index": {
+              "images": {
+                "datatype": "image-downloads",
+                "path": "streams/v1/images.json",
+                "format": "products:1.0",
+                "products": ${PRODUCTS_ARRAY}
+              }
+            },
+            "format": "index:1.0"
+          }
+          INDEXEOF
+
           echo "==> Merged registry contents:"
           find merged-registry -type f
           echo "==> Products in images.json:"
           jq '.products | keys' merged-registry/streams/v1/images.json
+          echo "==> Index.json:"
+          cat merged-registry/streams/v1/index.json
 
       - name: Generate index.html and directory listings
         run: |
@@ -422,6 +427,9 @@ jobs:
           MAINEOF2
 
           # Generate per-appliance directory listings
+          # Read file paths from images.json for accurate listings
+          IMAGES_JSON="merged-registry/streams/v1/images.json"
+
           for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
             version=$(yq -r '.version // "0.0.0"' "appliances/${appliance}/appliance.yaml" 2>/dev/null || echo "0.0.0")
             archs=$(yq -r ".appliances[] | select(.name == \"${appliance}\") | .architectures // [\"amd64\", \"arm64\"] | .[]" appliances.yaml)
@@ -435,23 +443,45 @@ jobs:
               mkdir -p "merged-registry/images/${appliance}/${arch}"
               ARCH_ROWS="${ARCH_ROWS}<tr><td><a href=\"${arch}/\">${arch}/</a></td><td>-</td><td>${BUILD_DATE}</td></tr>"
 
-              # Find actual image files for this appliance/arch
+              # Find files for this appliance/arch from images.json
+              # Look for products that have the appliance alias with this arch
               FILE_ROWS=""
-              for img_hash_dir in merged-registry/images/*/; do
-                hash_name=$(basename "$img_hash_dir")
-                # Skip our created directories
-                [[ "$hash_name" == "$appliance" ]] && continue
-                for file in "$img_hash_dir"*; do
-                  if [ -f "$file" ]; then
-                    filename=$(basename "$file")
-                    filesize=$(ls -lh "$file" 2>/dev/null | awk '{print $5}' || echo "-")
-                    FILE_ROWS="${FILE_ROWS}<tr><td><a href=\"../../${hash_name}/${filename}\">${filename}</a></td><td>${filesize}</td><td>-</td></tr>"
-                  fi
-                done
+
+              # Get all products that have this appliance alias for this arch
+              for product_key in $(jq -r '.products | keys[]' "$IMAGES_JSON"); do
+                product_arch=$(jq -r ".products[\"$product_key\"].arch" "$IMAGES_JSON")
+                product_aliases=$(jq -r ".products[\"$product_key\"].aliases // \"\"" "$IMAGES_JSON")
+
+                # Check if this product matches our appliance and arch
+                if [[ "$product_arch" == "$arch" ]] && echo "$product_aliases" | grep -qE "(^|,)${appliance}(,|\$|/)"; then
+                  # Get the latest version
+                  latest_version=$(jq -r ".products[\"$product_key\"].versions | keys | sort | last" "$IMAGES_JSON")
+
+                  # Get file paths and sizes from items
+                  for item_key in $(jq -r ".products[\"$product_key\"].versions[\"$latest_version\"].items | keys[]" "$IMAGES_JSON"); do
+                    item_path=$(jq -r ".products[\"$product_key\"].versions[\"$latest_version\"].items[\"$item_key\"].path" "$IMAGES_JSON")
+                    item_size=$(jq -r ".products[\"$product_key\"].versions[\"$latest_version\"].items[\"$item_key\"].size" "$IMAGES_JSON")
+
+                    if [[ -n "$item_path" ]] && [[ "$item_path" != "null" ]]; then
+                      filename=$(basename "$item_path")
+                      # Convert size to human readable
+                      if [[ "$item_size" -gt 1073741824 ]]; then
+                        human_size="$(echo "scale=1; $item_size/1073741824" | bc)G"
+                      elif [[ "$item_size" -gt 1048576 ]]; then
+                        human_size="$(echo "scale=1; $item_size/1048576" | bc)M"
+                      elif [[ "$item_size" -gt 1024 ]]; then
+                        human_size="$(echo "scale=1; $item_size/1024" | bc)K"
+                      else
+                        human_size="${item_size}B"
+                      fi
+                      FILE_ROWS="${FILE_ROWS}<tr><td><a href=\"../../${item_path#images/}\">${filename}</a></td><td>${human_size}</td><td>${BUILD_DATE}</td></tr>"
+                    fi
+                  done
+                fi
               done
 
               if [ -z "$FILE_ROWS" ]; then
-                FILE_ROWS="<tr><td colspan=\"3\"><em>Image files served via SimpleStreams protocol</em></td></tr>"
+                FILE_ROWS="<tr><td colspan=\"3\"><em>No image files found for this architecture</em></td></tr>"
               fi
 
               # Generate per-architecture page
@@ -519,6 +549,38 @@ jobs:
           </html>
           APPEOF
           done
+
+          # Generate /images/ index page
+          IMAGES_LIST=""
+          for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
+            IMAGES_LIST="${IMAGES_LIST}<tr><td><a href=\"${appliance}/\">${appliance}/</a></td><td>-</td><td>${BUILD_DATE}</td></tr>"
+          done
+
+          cat > "merged-registry/images/index.html" <<IMAGESEOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Index of /images/</title>
+            <style>
+              body { font-family: monospace; max-width: 900px; margin: 20px auto; padding: 0 20px; }
+              h1 { border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+              table { border-collapse: collapse; width: 100%; }
+              th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; }
+              th { background: #f5f5f5; }
+              a { color: #0066cc; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <h1>Index of /images/</h1>
+            <table>
+              <tr><th>Name</th><th>Size</th><th>Last Modified</th></tr>
+              <tr><td><a href="../">../</a></td><td>-</td><td>-</td></tr>
+          ${IMAGES_LIST}
+            </table>
+          </body>
+          </html>
+          IMAGESEOF
 
           echo "==> Generated directory listings:"
           find merged-registry -name "index.html" -type f
