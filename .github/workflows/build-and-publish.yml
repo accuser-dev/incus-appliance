@@ -69,7 +69,7 @@ jobs:
 
   build:
     needs: generate-matrix
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     strategy:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
       fail-fast: false
@@ -77,23 +77,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Cache distrobuilder base images
-        uses: actions/cache@v4
-        with:
-          path: .cache/distrobuilder
-          key: distrobuilder-${{ matrix.appliance }}-${{ matrix.arch }}-${{ hashFiles(format('appliances/{0}/image.yaml', matrix.appliance)) }}
-          restore-keys: |
-            distrobuilder-${{ matrix.appliance }}-${{ matrix.arch }}-
-            distrobuilder-${{ matrix.appliance }}-
-            distrobuilder-
-
-      - name: Prepare cache directory
-        run: |
-          # Create cache directory if it doesn't exist
-          mkdir -p .cache/distrobuilder
-          # Ensure distrobuilder can write to cache (runs as root)
-          sudo chown -R root:root .cache/distrobuilder 2>/dev/null || true
 
       - name: Set up QEMU for cross-architecture builds
         if: matrix.arch != 'amd64'
@@ -110,12 +93,8 @@ jobs:
         run: |
           sudo ./bin/build-appliance.sh ${{ matrix.appliance }} ${{ matrix.arch }}
 
-          # Fix ownership so we can work with the files and cache can be saved
+          # Fix ownership so we can work with the files
           sudo chown -R $USER:$USER .build
-          # Cache directory may not exist if distrobuilder cleaned it up
-          if [ -d .cache/distrobuilder ]; then
-            sudo chown -R $USER:$USER .cache/distrobuilder
-          fi
 
       - name: Prepare image files for release
         id: metadata
