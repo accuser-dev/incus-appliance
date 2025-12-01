@@ -23,38 +23,80 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       appliances: ${{ steps.set-matrix.outputs.appliances }}
       versions: ${{ steps.set-matrix.outputs.versions }}
+      has_builds: ${{ steps.set-matrix.outputs.has_builds }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to detect changes
 
       - name: Install yq
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
+      - name: Detect changed appliances
+        id: changes
+        run: |
+          # For workflow_dispatch, build all appliances
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Workflow dispatch - building all appliances"
+            CHANGED_APPLIANCES=$(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml | tr '\n' ' ')
+          else
+            # Get list of changed files
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            # Check if core files changed (rebuild all)
+            if echo "$CHANGED_FILES" | grep -qE '^(bin/|appliances\.yaml|\.github/workflows/build-and-publish\.yml)'; then
+              echo "Core files changed - building all appliances"
+              CHANGED_APPLIANCES=$(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml | tr '\n' ' ')
+            else
+              # Detect which appliances changed
+              CHANGED_APPLIANCES=""
+              for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
+                if echo "$CHANGED_FILES" | grep -q "^appliances/${appliance}/"; then
+                  CHANGED_APPLIANCES="${CHANGED_APPLIANCES}${appliance} "
+                fi
+              done
+            fi
+          fi
+
+          echo "Changed appliances: $CHANGED_APPLIANCES"
+          echo "changed_appliances=$CHANGED_APPLIANCES" >> $GITHUB_OUTPUT
+
       - name: Generate build matrix
         id: set-matrix
         run: |
+          CHANGED_APPLIANCES="${{ steps.changes.outputs.changed_appliances }}"
+
           # Read defaults from appliances.yaml
           DEFAULT_ARCHS=$(yq -o=json '.defaults.architectures // ["amd64"]' appliances.yaml)
 
-          # Generate matrix includes with version from each appliance's appliance.yaml
-          MATRIX_INCLUDES=$(for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
-            # Read version from appliance.yaml, default to 0.0.0
-            version=$(yq -r '.version // "0.0.0"' "appliances/${appliance}/appliance.yaml" 2>/dev/null || echo "0.0.0")
-            # Use appliance-specific architectures if defined, otherwise use defaults
-            archs=$(yq -o=json ".appliances[] | select(.name == \"${appliance}\") | .architectures" appliances.yaml)
-            if [ "$archs" = "null" ] || [ -z "$archs" ]; then
-              archs="$DEFAULT_ARCHS"
-            fi
-            echo "{\"appliance\": \"${appliance}\", \"version\": \"${version}\", \"archs\": ${archs}}"
-          done | jq -s '[.[] | .archs[] as $arch | {appliance: .appliance, version: .version, arch: $arch}]')
+          # Generate matrix only for changed appliances
+          if [ -z "$CHANGED_APPLIANCES" ]; then
+            echo "No appliances to build"
+            echo "matrix={\"include\":[]}" >> $GITHUB_OUTPUT
+            echo "has_builds=false" >> $GITHUB_OUTPUT
+          else
+            MATRIX_INCLUDES=$(for appliance in $CHANGED_APPLIANCES; do
+              # Read version from appliance.yaml, default to 0.0.0
+              version=$(yq -r '.version // "0.0.0"' "appliances/${appliance}/appliance.yaml" 2>/dev/null || echo "0.0.0")
+              # Use appliance-specific architectures if defined, otherwise use defaults
+              archs=$(yq -o=json ".appliances[] | select(.name == \"${appliance}\") | .architectures" appliances.yaml)
+              if [ "$archs" = "null" ] || [ -z "$archs" ]; then
+                archs="$DEFAULT_ARCHS"
+              fi
+              echo "{\"appliance\": \"${appliance}\", \"version\": \"${version}\", \"archs\": ${archs}}"
+            done | jq -s '[.[] | .archs[] as $arch | {appliance: .appliance, version: .version, arch: $arch}]')
 
-          # Create the matrix object
-          MATRIX=$(echo "$MATRIX_INCLUDES" | jq -c '{include: .}')
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+            MATRIX=$(echo "$MATRIX_INCLUDES" | jq -c '{include: .}')
+            echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+            echo "has_builds=true" >> $GITHUB_OUTPUT
+          fi
 
-          # Also output just the appliance names for other jobs
+          # Output all appliance names for other jobs (not just changed ones)
           APPLIANCES=$(yq -o=json '[.appliances[] | select(.enabled != false) | .name]' appliances.yaml | jq -c '.')
           echo "appliances=$APPLIANCES" >> $GITHUB_OUTPUT
 
@@ -66,13 +108,15 @@ jobs:
           echo "versions=$VERSIONS" >> $GITHUB_OUTPUT
 
           # Debug output
+          echo "Changed appliances: $CHANGED_APPLIANCES"
           echo "Generated matrix:"
-          echo "$MATRIX" | jq .
-          echo "Appliances: $APPLIANCES"
+          echo "$MATRIX" | jq . || echo "(empty)"
+          echo "All appliances: $APPLIANCES"
           echo "Versions: $VERSIONS"
 
   build:
     needs: generate-matrix
+    if: needs.generate-matrix.outputs.has_builds == 'true'
     runs-on: self-hosted
     strategy:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
@@ -151,6 +195,7 @@ jobs:
 
   release:
     needs: [generate-matrix, build]
+    if: needs.generate-matrix.outputs.has_builds == 'true'
     runs-on: ubuntu-24.04
 
     steps:
@@ -286,6 +331,7 @@ jobs:
 
   publish:
     needs: [generate-matrix, build]
+    if: needs.generate-matrix.outputs.has_builds == 'true'
     runs-on: ubuntu-24.04
 
     steps:
@@ -297,6 +343,21 @@ jobs:
           sudo apt-get update && sudo apt-get install -y jq
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
+
+      - name: Download existing registry from GitHub Pages
+        run: |
+          REGISTRY_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          mkdir -p existing-registry/streams/v1
+          mkdir -p existing-registry/images
+
+          # Try to fetch existing images.json (may not exist on first run)
+          if curl -sf "${REGISTRY_URL}/streams/v1/images.json" -o existing-registry/streams/v1/images.json; then
+            echo "Downloaded existing images.json"
+            cat existing-registry/streams/v1/images.json | jq '.products | keys'
+          else
+            echo "No existing registry found - starting fresh"
+            echo '{"content_id": "images", "datatype": "image-downloads", "format": "products:1.0", "products": {}}' > existing-registry/streams/v1/images.json
+          fi
 
       - name: Download all registry artifacts
         uses: actions/download-artifact@v4
@@ -313,8 +374,10 @@ jobs:
           echo "==> Downloaded artifacts:"
           ls -la registries/
 
-          # Initialize empty images.json with base structure
-          echo '{"content_id": "images", "datatype": "image-downloads", "format": "products:1.0", "products": {}}' > merged-registry/streams/v1/images.json
+          # Start with existing registry (preserves unchanged appliances)
+          echo "==> Starting with existing registry:"
+          cp existing-registry/streams/v1/images.json merged-registry/streams/v1/images.json
+          jq '.products | keys' merged-registry/streams/v1/images.json
 
           # Merge all registry artifacts
           for reg_dir in registries/registry-*; do
@@ -607,7 +670,7 @@ jobs:
   summary:
     needs: [generate-matrix, release, publish]
     runs-on: ubuntu-24.04
-    if: success()
+    if: always() && needs.generate-matrix.result == 'success'
 
     steps:
       - name: Checkout repository
@@ -620,23 +683,31 @@ jobs:
 
       - name: Create summary
         run: |
-          echo "## ✅ Registry published successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Registry URL" >> $GITHUB_STEP_SUMMARY
-          echo "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🚀 Quick Start" >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "# Add the remote" >> $GITHUB_STEP_SUMMARY
-          echo "incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Launch an appliance" >> $GITHUB_STEP_SUMMARY
-          echo "incus launch appliance:<name> my-instance" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📋 Built Appliances" >> $GITHUB_STEP_SUMMARY
-          for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
-            version=$(yq -r '.version // "0.0.0"' "appliances/${appliance}/appliance.yaml" 2>/dev/null || echo "0.0.0")
-            archs=$(yq -r ".appliances[] | select(.name == \"${appliance}\") | .architectures // [\"amd64\", \"arm64\"] | join(\", \")" appliances.yaml)
-            echo "- **${appliance}** v${version} (${archs})" >> $GITHUB_STEP_SUMMARY
-          done
+          HAS_BUILDS="${{ needs.generate-matrix.outputs.has_builds }}"
+
+          if [ "$HAS_BUILDS" = "true" ]; then
+            echo "## ✅ Registry published successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📦 Registry URL" >> $GITHUB_STEP_SUMMARY
+            echo "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🚀 Quick Start" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "# Add the remote" >> $GITHUB_STEP_SUMMARY
+            echo "incus remote add appliance https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} --protocol simplestreams" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "# Launch an appliance" >> $GITHUB_STEP_SUMMARY
+            echo "incus launch appliance:<name> my-instance" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📋 Built Appliances" >> $GITHUB_STEP_SUMMARY
+            for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
+              version=$(yq -r '.version // "0.0.0"' "appliances/${appliance}/appliance.yaml" 2>/dev/null || echo "0.0.0")
+              archs=$(yq -r ".appliances[] | select(.name == \"${appliance}\") | .architectures // [\"amd64\", \"arm64\"] | join(\", \")" appliances.yaml)
+              echo "- **${appliance}** v${version} (${archs})" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "## ℹ️ No appliances needed rebuilding" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No appliance files were changed in this commit." >> $GITHUB_STEP_SUMMARY
+          fi
