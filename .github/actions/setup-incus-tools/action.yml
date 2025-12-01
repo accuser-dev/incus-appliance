@@ -29,7 +29,7 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y incus-extra ${{ inputs.extra-packages }}
+        sudo apt-get install -y make incus-extra ${{ inputs.extra-packages }}
 
     - name: Verify installation
       shell: bash

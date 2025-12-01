@@ -42,7 +42,7 @@ jobs:
           find bin scripts -type f -name "*.sh" -exec shellcheck {} +
 
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     name: Test Build Process
     needs: validate
 
@@ -57,28 +57,9 @@ jobs:
       - name: Setup Incus tools
         uses: ./.github/actions/setup-incus-tools
 
-      - name: Cache distrobuilder base images
-        uses: actions/cache@v4
-        with:
-          path: .cache/distrobuilder
-          key: distrobuilder-${{ matrix.appliance }}-amd64-${{ hashFiles(format('appliances/{0}/image.yaml', matrix.appliance)) }}
-          restore-keys: |
-            distrobuilder-${{ matrix.appliance }}-amd64-
-            distrobuilder-${{ matrix.appliance }}-
-            distrobuilder-
-
-      - name: Prepare cache directory
-        run: |
-          mkdir -p .cache/distrobuilder
-          sudo chown -R root:root .cache/distrobuilder 2>/dev/null || true
-
       - name: Build appliance
         run: |
           make build-${{ matrix.appliance }}
-          # Fix ownership so cache can be saved
-          if [ -d .cache/distrobuilder ]; then
-            sudo chown -R $USER:$USER .cache/distrobuilder
-          fi
 
       - name: List registry contents
         run: |
