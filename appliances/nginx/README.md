@@ -314,5 +314,5 @@ incus exec my-proxy -- chown -R www-data:www-data /var/cache/nginx
 
 ## See Also
 
-- [Traefik Appliance](../traefik/) - Modern reverse proxy with automatic HTTPS
-- [Caddy Appliance](../caddy/) - Web server with automatic HTTPS
+- [Nginx Documentation](https://nginx.org/en/docs/)
+- [Incus Documentation](https://linuxcontainers.org/incus/docs/main/)
