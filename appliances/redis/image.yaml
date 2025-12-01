@@ -118,7 +118,7 @@ actions:
       # Ensure Redis directories exist
       mkdir -p /var/lib/redis
       mkdir -p /var/log/redis
-      mkdir -p /run/redis
+      # Note: /run/redis is created at runtime by systemd (tmpfiles.d)
 
   - trigger: post-packages
     action: |-
@@ -149,7 +149,6 @@ actions:
       # Set permissions
       chown -R redis:redis /var/lib/redis
       chown -R redis:redis /var/log/redis
-      chown -R redis:redis /run/redis
       chown redis:redis /etc/redis/redis-appliance.conf
 
       # Clean up package cache

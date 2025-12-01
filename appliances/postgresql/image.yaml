@@ -92,7 +92,7 @@ actions:
       # Ensure PostgreSQL directories exist
       mkdir -p /var/lib/postgresql
       mkdir -p /var/log/postgresql
-      mkdir -p /run/postgresql
+      # Note: /run/postgresql is created at runtime by systemd (tmpfiles.d)
 
   - trigger: post-packages
     action: |-
@@ -120,7 +120,6 @@ actions:
       # Set permissions
       chown -R postgres:postgres /var/lib/postgresql
       chown -R postgres:postgres /var/log/postgresql
-      chown -R postgres:postgres /run/postgresql
 
       # Clean up package cache
       apt-get clean
