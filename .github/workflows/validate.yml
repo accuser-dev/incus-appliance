@@ -9,16 +9,6 @@ on:
       - 'bin/**'
       - 'scripts/**'
       - '.github/workflows/**'
-  push:
-    branches:
-      - main
-    paths:
-      - 'appliances/**'
-      - 'appliances.yaml'
-      - 'schemas/**'
-      - 'bin/**'
-      - 'scripts/**'
-      - '.github/workflows/**'
 
 jobs:
   validate:
