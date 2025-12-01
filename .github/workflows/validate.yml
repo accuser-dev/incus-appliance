@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'appliances/**'
+      - 'appliances.yaml'
+      - 'schemas/**'
       - 'bin/**'
       - 'scripts/**'
       - '.github/workflows/**'
@@ -12,6 +14,8 @@ on:
       - main
     paths:
       - 'appliances/**'
+      - 'appliances.yaml'
+      - 'schemas/**'
       - 'bin/**'
       - 'scripts/**'
       - '.github/workflows/**'
@@ -30,6 +34,14 @@ jobs:
         with:
           packages: yamllint shellcheck
           version: 1.0
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Install check-jsonschema
+        run: pip install check-jsonschema
 
       - name: Validate YAML files
         run: make lint || true
