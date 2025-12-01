@@ -6,7 +6,7 @@
 defaults:
   architectures:
     - amd64
-    - arm64
+    # - arm64  # Temporarily disabled - re-enable when arm64 builds are needed
   enabled: true
 
 # List of appliances to build
