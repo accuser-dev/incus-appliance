@@ -35,14 +35,18 @@ jobs:
       - name: Generate build matrix
         id: set-matrix
         run: |
-          # Read defaults
-          DEFAULT_ARCHS=$(yq -o=json '.defaults.architectures // ["amd64", "arm64"]' appliances.yaml)
+          # Read defaults from appliances.yaml
+          DEFAULT_ARCHS=$(yq -o=json '.defaults.architectures // ["amd64"]' appliances.yaml)
 
           # Generate matrix includes with version from each appliance's appliance.yaml
           MATRIX_INCLUDES=$(for appliance in $(yq -r '.appliances[] | select(.enabled != false) | .name' appliances.yaml); do
             # Read version from appliance.yaml, default to 0.0.0
             version=$(yq -r '.version // "0.0.0"' "appliances/${appliance}/appliance.yaml" 2>/dev/null || echo "0.0.0")
-            archs=$(yq -o=json ".appliances[] | select(.name == \"${appliance}\") | .architectures // [\"amd64\", \"arm64\"]" appliances.yaml)
+            # Use appliance-specific architectures if defined, otherwise use defaults
+            archs=$(yq -o=json ".appliances[] | select(.name == \"${appliance}\") | .architectures" appliances.yaml)
+            if [ "$archs" = "null" ] || [ -z "$archs" ]; then
+              archs="$DEFAULT_ARCHS"
+            fi
             echo "{\"appliance\": \"${appliance}\", \"version\": \"${version}\", \"archs\": ${archs}}"
           done | jq -s '[.[] | .archs[] as $arch | {appliance: .appliance, version: .version, arch: $arch}]')
 
