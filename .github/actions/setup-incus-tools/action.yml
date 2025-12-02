@@ -48,6 +48,11 @@ runs:
           PACKAGES_TO_INSTALL="incus-extra"
         fi
 
+        # squashfs-tools is required for mksquashfs (creating split images)
+        if ! command -v mksquashfs &> /dev/null; then
+          PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL squashfs-tools"
+        fi
+
         if [ -n "${{ inputs.extra-packages }}" ]; then
           PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL ${{ inputs.extra-packages }}"
         fi

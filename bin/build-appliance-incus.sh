@@ -188,22 +188,51 @@ echo "==> Publishing container as image..."
 IMAGE_ALIAS="appliance-${APPLIANCE}-${ARCH}-build"
 $SUDO incus publish "$BUILD_CONTAINER" --alias "$IMAGE_ALIAS" --force
 
-# Export the image
+# Export the image as a unified tarball
 echo "==> Exporting image..."
 cd "$BUILD_DIR"
-$SUDO incus image export "$IMAGE_ALIAS" . --split
+$SUDO incus image export "$IMAGE_ALIAS" .
 
-# The export creates lxd.tar.xz and rootfs.squashfs, rename to incus.tar.xz
-if [[ -f "lxd.tar.xz" ]]; then
-  mv lxd.tar.xz incus.tar.xz
-fi
-
-# Verify outputs
-if [[ ! -f "incus.tar.xz" ]] || [[ ! -f "rootfs.squashfs" ]]; then
-  echo "Error: Image export did not produce expected outputs"
+# Find the exported file (could be .tar.gz or .tar.xz)
+EXPORTED_FILE=$(find . -maxdepth 1 -name "*.tar.*" -type f | head -1)
+EXPORTED_FILE="${EXPORTED_FILE#./}"  # Remove leading ./
+if [[ -z "$EXPORTED_FILE" ]]; then
+  echo "Error: No exported image file found"
   ls -la
   exit 1
 fi
+echo "    Exported: ${EXPORTED_FILE}"
+
+# Convert unified tarball to split format for incus-simplestreams
+echo "==> Converting to split image format..."
+WORK_DIR="${BUILD_DIR}/work"
+mkdir -p "$WORK_DIR"
+
+# Extract the unified tarball
+tar -xf "$EXPORTED_FILE" -C "$WORK_DIR"
+
+# Create metadata tarball (contains metadata.yaml and templates/)
+echo "    Creating metadata tarball..."
+cd "$WORK_DIR"
+tar -cJf "${BUILD_DIR}/incus.tar.xz" metadata.yaml templates/ 2>/dev/null || \
+  tar -cJf "${BUILD_DIR}/incus.tar.xz" metadata.yaml
+
+# Create squashfs from rootfs
+echo "    Creating rootfs squashfs..."
+$SUDO mksquashfs rootfs "${BUILD_DIR}/rootfs.squashfs" -noappend -comp xz -quiet
+
+# Clean up work directory
+cd "$BUILD_DIR"
+$SUDO rm -rf "$WORK_DIR"
+rm -f "$EXPORTED_FILE"
+
+# Verify outputs
+if [[ ! -f "incus.tar.xz" ]] || [[ ! -f "rootfs.squashfs" ]]; then
+  echo "Error: Failed to create split image files"
+  ls -la
+  exit 1
+fi
+echo "    Created: incus.tar.xz and rootfs.squashfs"
 
 # Clean up the temporary image
 $SUDO incus image delete "$IMAGE_ALIAS" 2>/dev/null || true
