@@ -174,9 +174,27 @@ $SUDO incus exec "$BUILD_CONTAINER" -- bash -c '
   # Clean temporary files
   rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
 
+  # Clear log files from build process
+  find /var/log -type f -name "*.log" -delete 2>/dev/null || true
+  find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
+  : > /var/log/wtmp 2>/dev/null || true
+  : > /var/log/btmp 2>/dev/null || true
+  : > /var/log/lastlog 2>/dev/null || true
+
+  # Clear shell history
+  rm -f /root/.bash_history 2>/dev/null || true
+  rm -f /home/*/.bash_history 2>/dev/null || true
+
+  # Remove SSH host keys (will be regenerated on first boot)
+  rm -f /etc/ssh/ssh_host_* 2>/dev/null || true
+
   # Clear machine-id (will be regenerated on first boot)
   truncate -s 0 /etc/machine-id 2>/dev/null || true
   rm -f /var/lib/dbus/machine-id 2>/dev/null || true
+
+  # Clear other caches
+  rm -rf /var/cache/apt/* 2>/dev/null || true
+  rm -rf /var/cache/debconf/* 2>/dev/null || true
 '
 
 # Stop the container
