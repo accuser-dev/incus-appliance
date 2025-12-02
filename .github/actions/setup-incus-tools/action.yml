@@ -1,5 +1,5 @@
 name: 'Setup Incus Tools'
-description: 'Install incus-extra and related tools from the Zabbly repository'
+description: 'Install and configure Incus with incus-simplestreams for building appliances'
 
 inputs:
   extra-packages:
@@ -13,9 +13,11 @@ runs:
     - name: Setup Zabbly repository
       shell: bash
       run: |
-        sudo mkdir -p /etc/apt/keyrings
-        sudo curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
-        sudo sh -c 'cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+        if [ ! -f /etc/apt/keyrings/zabbly.asc ]; then
+          echo "Setting up Zabbly repository..."
+          sudo mkdir -p /etc/apt/keyrings
+          sudo curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+          sudo sh -c 'cat > /etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
         Enabled: yes
         Types: deb
         URIs: https://pkgs.zabbly.com/incus/stable
@@ -24,15 +26,119 @@ runs:
         Architectures: $(dpkg --print-architecture)
         Signed-By: /etc/apt/keyrings/zabbly.asc
         EOF'
+          sudo apt-get update
+        fi
 
-    - name: Install packages
+    - name: Install Incus
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y make incus-extra ${{ inputs.extra-packages }}
+        if ! command -v incus &> /dev/null; then
+          echo "Installing Incus..."
+          sudo apt-get install -y incus
+        else
+          echo "Incus already installed: $(incus --version)"
+        fi
+
+    - name: Install incus-simplestreams and extra packages
+      shell: bash
+      run: |
+        PACKAGES_TO_INSTALL=""
+
+        if ! command -v incus-simplestreams &> /dev/null; then
+          PACKAGES_TO_INSTALL="incus-extra"
+        fi
+
+        # squashfs-tools is required for mksquashfs (creating split images)
+        if ! command -v mksquashfs &> /dev/null; then
+          PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL squashfs-tools"
+        fi
+
+        if [ -n "${{ inputs.extra-packages }}" ]; then
+          PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL ${{ inputs.extra-packages }}"
+        fi
+
+        if [ -n "$PACKAGES_TO_INSTALL" ]; then
+          echo "Installing: $PACKAGES_TO_INSTALL"
+          sudo apt-get update
+          sudo apt-get install -y $PACKAGES_TO_INSTALL
+        else
+          echo "All required packages already installed"
+        fi
+
+    - name: Install yq
+      shell: bash
+      run: |
+        if ! command -v yq &> /dev/null; then
+          echo "Installing yq..."
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture)
+          sudo chmod +x /usr/local/bin/yq
+        else
+          echo "yq already installed: $(yq --version)"
+        fi
+
+    - name: Initialize Incus
+      shell: bash
+      run: |
+        # Check if Incus is already initialized by looking for storage pools
+        if ! sudo incus storage list 2>/dev/null | grep -q "default"; then
+          echo "Initializing Incus with preseed configuration..."
+          cat <<EOF | sudo incus admin init --preseed
+        config: {}
+        networks:
+        - config:
+            ipv4.address: auto
+            ipv6.address: none
+          description: ""
+          name: incusbr0
+          type: bridge
+        storage_pools:
+        - config:
+            source: /var/lib/incus/storage-pools/default
+          description: ""
+          name: default
+          driver: dir
+        profiles:
+        - config: {}
+          description: Default Incus profile
+          devices:
+            eth0:
+              name: eth0
+              network: incusbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+          name: default
+        projects: []
+        EOF
+          echo "Incus initialized successfully"
+        else
+          echo "Incus already initialized with storage pool"
+        fi
+
+    - name: Configure user permissions
+      shell: bash
+      run: |
+        # Add current user to incus-admin group if not already a member
+        if ! groups | grep -q incus-admin; then
+          echo "Adding user to incus-admin group..."
+          sudo usermod -aG incus-admin $USER
+          # Note: Group membership won't take effect in this shell session
+          # The build script uses sudo as fallback
+        fi
 
     - name: Verify installation
       shell: bash
       run: |
-        distrobuilder --version
-        incus-simplestreams --version
+        echo "Incus version: $(incus --version)"
+        echo "incus-simplestreams version: $(incus-simplestreams --version)"
+        echo ""
+        echo "Storage pools:"
+        sudo incus storage list
+        echo ""
+        echo "Networks:"
+        sudo incus network list
+        echo ""
+        echo "Default profile:"
+        sudo incus profile show default
