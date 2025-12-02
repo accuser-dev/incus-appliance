@@ -60,16 +60,29 @@ echo "==> Building appliance: ${APPLIANCE} v${VERSION} (${ARCH})"
 # Create build directory
 mkdir -p "$BUILD_DIR"
 
+# Determine if we need sudo for incus commands
+# If user can access incus socket directly, no sudo needed
+SUDO=""
+if ! incus info >/dev/null 2>&1; then
+  if sudo incus info >/dev/null 2>&1; then
+    SUDO="sudo"
+    echo "==> Using sudo for incus commands"
+  else
+    echo "Error: Cannot access Incus. Ensure Incus is running and user has permissions."
+    exit 1
+  fi
+fi
+
 # Cleanup function
 cleanup() {
   echo "==> Cleaning up build container..."
-  incus delete -f "$BUILD_CONTAINER" 2>/dev/null || true
+  $SUDO incus delete -f "$BUILD_CONTAINER" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # Launch container from Debian 12 cloud image
 echo "==> Launching build container from images:debian/12/cloud..."
-incus launch "images:debian/12/cloud/${ARCH}" "$BUILD_CONTAINER"
+$SUDO incus launch "images:debian/12/cloud/${ARCH}" "$BUILD_CONTAINER"
 
 # Apply cloud-init configuration
 echo "==> Applying cloud-init configuration..."
@@ -77,18 +90,18 @@ echo "==> Applying cloud-init configuration..."
 CLOUD_INIT_DATA=$(yq -r '.config."cloud-init.user-data" // ""' "${APPLIANCE_DIR}/config.yaml")
 if [[ -n "$CLOUD_INIT_DATA" ]]; then
   # Set cloud-init user-data on the container
-  incus config set "$BUILD_CONTAINER" cloud-init.user-data "$CLOUD_INIT_DATA"
+  $SUDO incus config set "$BUILD_CONTAINER" cloud-init.user-data "$CLOUD_INIT_DATA"
 fi
 
 # Check for network config
 NETWORK_CONFIG=$(yq -r '.config."cloud-init.network-config" // ""' "${APPLIANCE_DIR}/config.yaml")
 if [[ -n "$NETWORK_CONFIG" ]]; then
-  incus config set "$BUILD_CONTAINER" cloud-init.network-config "$NETWORK_CONFIG"
+  $SUDO incus config set "$BUILD_CONTAINER" cloud-init.network-config "$NETWORK_CONFIG"
 fi
 
 # Restart to apply cloud-init
 echo "==> Restarting container to apply cloud-init..."
-incus restart "$BUILD_CONTAINER"
+$SUDO incus restart "$BUILD_CONTAINER"
 
 # Wait for cloud-init to complete
 echo "==> Waiting for cloud-init to complete..."
@@ -97,7 +110,7 @@ WAIT_INTERVAL=5
 WAITED=0
 while [[ $WAITED -lt $MAX_WAIT ]]; do
   # Check if cloud-init has finished
-  if incus exec "$BUILD_CONTAINER" -- test -f /var/lib/cloud/instance/boot-finished 2>/dev/null; then
+  if $SUDO incus exec "$BUILD_CONTAINER" -- test -f /var/lib/cloud/instance/boot-finished 2>/dev/null; then
     echo "==> cloud-init completed"
     break
   fi
@@ -109,15 +122,15 @@ done
 if [[ $WAITED -ge $MAX_WAIT ]]; then
   echo "Error: cloud-init did not complete within ${MAX_WAIT} seconds"
   echo "==> cloud-init status:"
-  incus exec "$BUILD_CONTAINER" -- cloud-init status --long 2>/dev/null || true
+  $SUDO incus exec "$BUILD_CONTAINER" -- cloud-init status --long 2>/dev/null || true
   echo "==> cloud-init logs:"
-  incus exec "$BUILD_CONTAINER" -- tail -50 /var/log/cloud-init-output.log 2>/dev/null || true
+  $SUDO incus exec "$BUILD_CONTAINER" -- tail -50 /var/log/cloud-init-output.log 2>/dev/null || true
   exit 1
 fi
 
 # Show cloud-init result
 echo "==> cloud-init status:"
-incus exec "$BUILD_CONTAINER" -- cloud-init status --long 2>/dev/null || true
+$SUDO incus exec "$BUILD_CONTAINER" -- cloud-init status --long 2>/dev/null || true
 
 # Copy files from files/ directory if it exists
 if [[ -d "${APPLIANCE_DIR}/files" ]]; then
@@ -131,11 +144,11 @@ if [[ -d "${APPLIANCE_DIR}/files" ]]; then
     dest_dir=$(dirname "$dest_path")
 
     # Ensure destination directory exists
-    incus exec "$BUILD_CONTAINER" -- mkdir -p "$dest_dir"
+    $SUDO incus exec "$BUILD_CONTAINER" -- mkdir -p "$dest_dir"
 
     # Push the file
     echo "    Copying: ${rel_path} -> ${dest_path}"
-    incus file push "$file" "${BUILD_CONTAINER}${dest_path}"
+    $SUDO incus file push "$file" "${BUILD_CONTAINER}${dest_path}"
   done
   cd "$PROJECT_ROOT"
 fi
@@ -144,12 +157,12 @@ fi
 POST_FILES_CMD=$(yq -r '.post_files // ""' "${APPLIANCE_DIR}/config.yaml")
 if [[ -n "$POST_FILES_CMD" ]]; then
   echo "==> Running post-files commands..."
-  incus exec "$BUILD_CONTAINER" -- bash -c "$POST_FILES_CMD"
+  $SUDO incus exec "$BUILD_CONTAINER" -- bash -c "$POST_FILES_CMD"
 fi
 
 # Clean up the container for image creation
 echo "==> Cleaning up container for image creation..."
-incus exec "$BUILD_CONTAINER" -- bash -c '
+$SUDO incus exec "$BUILD_CONTAINER" -- bash -c '
   # Clean cloud-init state so it runs again on first boot
   cloud-init clean --logs 2>/dev/null || true
 
@@ -167,17 +180,17 @@ incus exec "$BUILD_CONTAINER" -- bash -c '
 
 # Stop the container
 echo "==> Stopping container..."
-incus stop "$BUILD_CONTAINER"
+$SUDO incus stop "$BUILD_CONTAINER"
 
 # Publish as image
 echo "==> Publishing container as image..."
 IMAGE_ALIAS="appliance-${APPLIANCE}-${ARCH}-build"
-incus publish "$BUILD_CONTAINER" --alias "$IMAGE_ALIAS" --force
+$SUDO incus publish "$BUILD_CONTAINER" --alias "$IMAGE_ALIAS" --force
 
 # Export the image
 echo "==> Exporting image..."
 cd "$BUILD_DIR"
-incus image export "$IMAGE_ALIAS" . --split
+$SUDO incus image export "$IMAGE_ALIAS" . --split
 
 # The export creates lxd.tar.xz and rootfs.squashfs, rename to incus.tar.xz
 if [[ -f "lxd.tar.xz" ]]; then
@@ -192,7 +205,7 @@ if [[ ! -f "incus.tar.xz" ]] || [[ ! -f "rootfs.squashfs" ]]; then
 fi
 
 # Clean up the temporary image
-incus image delete "$IMAGE_ALIAS" 2>/dev/null || true
+$SUDO incus image delete "$IMAGE_ALIAS" 2>/dev/null || true
 
 # Add to SimpleStreams registry
 echo "==> Adding to SimpleStreams registry..."
@@ -202,7 +215,7 @@ mkdir -p "$REGISTRY_DIR"
 # Aliases follow semantic versioning: name, name:version, name:major.minor, name:major, name:latest
 # Note: incus-simplestreams automatically adds /${ARCH} suffix to aliases
 cd "$REGISTRY_DIR"
-incus-simplestreams add \
+$SUDO incus-simplestreams add \
   "$BUILD_DIR/incus.tar.xz" \
   "$BUILD_DIR/rootfs.squashfs" \
   --alias "${APPLIANCE}" \
