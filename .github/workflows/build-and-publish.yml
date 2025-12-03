@@ -38,9 +38,14 @@ jobs:
           fetch-depth: 2  # Need previous commit to detect changes
 
       - name: Install yq
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: |
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
 
       - name: Detect changed appliances
         id: changes
@@ -148,9 +153,14 @@ jobs:
         uses: ./.github/actions/setup-incus-tools
 
       - name: Build appliance with Incus
-        run: |
-          # Build using the new Incus-based build script
-          ./bin/build-appliance-incus.sh ${{ matrix.appliance }} ${{ matrix.arch }}
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: |
+            # Build using the new Incus-based build script
+            ./bin/build-appliance-incus.sh ${{ matrix.appliance }} ${{ matrix.arch }}
 
       - name: Extract rootfs for security scanning
         id: extract
@@ -176,11 +186,17 @@ jobs:
           ignore-unfixed: true
           trivyignores: '.trivyignore'
 
+      - name: Install Trivy CLI
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: |
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+
       - name: Fail on critical vulnerabilities
         run: |
-          # Install Trivy using the official install script (works on any Linux)
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-
           # Check for critical vulnerabilities - fail the build if found
           trivy rootfs --exit-code 1 --severity CRITICAL --ignore-unfixed --ignorefile .trivyignore ${{ steps.extract.outputs.scan_dir }} || {
             echo "::error::Critical vulnerabilities found in ${{ matrix.appliance }} (${{ matrix.arch }})"
@@ -252,9 +268,14 @@ jobs:
           fetch-depth: 0  # Full history for changelog generation
 
       - name: Install yq
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: |
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
 
       - name: Download all image artifacts
         uses: actions/download-artifact@v4
@@ -386,10 +407,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: |
+            sudo apt-get update && sudo apt-get install -y jq
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
 
       - name: Download existing registry from GitHub Pages
         run: |
@@ -732,9 +758,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install yq
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: |
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
 
       - name: Create summary
         run: |
