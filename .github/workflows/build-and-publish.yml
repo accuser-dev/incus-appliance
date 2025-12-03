@@ -155,9 +155,9 @@ jobs:
       - name: Build appliance with Incus
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 30
-          max_attempts: 3
-          retry_wait_seconds: 60
+          timeout_minutes: 10
+          max_attempts: 2
+          retry_wait_seconds: 30
           command: |
             # Build using the Incus-based build script
             ./bin/build-appliance.sh ${{ matrix.appliance }} ${{ matrix.arch }}
