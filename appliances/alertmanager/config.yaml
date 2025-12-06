@@ -1,0 +1,154 @@
+# config.yaml - Incus cloud-init configuration for Alertmanager appliance
+# This file configures the container using cloud-init
+
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    package_update: true
+    package_upgrade: false
+
+    packages:
+      # Base system
+      - ca-certificates
+      - curl
+      - tzdata
+      - logrotate
+      # Networking
+      - iproute2
+      - iputils-ping
+      # Alertmanager
+      - prometheus-alertmanager
+
+    write_files:
+      - path: /etc/prometheus/alertmanager.yml
+        permissions: '0644'
+        content: |
+          # Alertmanager configuration
+          # See: https://prometheus.io/docs/alerting/latest/configuration/
+
+          global:
+            # How long to wait before sending a notification again
+            resolve_timeout: 5m
+
+            # SMTP settings (configure for email notifications)
+            # smtp_smarthost: 'smtp.example.com:587'
+            # smtp_from: 'alertmanager@example.com'
+            # smtp_auth_username: 'alertmanager'
+            # smtp_auth_password: 'password'
+
+          # Route tree for alert routing
+          route:
+            # Default receiver
+            receiver: 'default-receiver'
+
+            # Group alerts by these labels
+            group_by: ['alertname', 'severity']
+
+            # How long to wait before sending first notification
+            group_wait: 30s
+
+            # How long to wait before sending notification about new alerts
+            group_interval: 5m
+
+            # How long to wait before resending notification
+            repeat_interval: 4h
+
+            # Child routes (examples)
+            routes: []
+            # - match:
+            #     severity: critical
+            #   receiver: 'critical-receiver'
+            #   continue: true
+
+          # Notification receivers
+          receivers:
+            - name: 'default-receiver'
+              # Webhook example (uncomment and configure)
+              # webhook_configs:
+              #   - url: 'http://localhost:5001/webhook'
+
+              # Email example (uncomment and configure smtp settings above)
+              # email_configs:
+              #   - to: 'admin@example.com'
+
+            # Example: Slack receiver
+            # - name: 'slack-receiver'
+            #   slack_configs:
+            #     - api_url: 'https://hooks.slack.com/services/xxx/yyy/zzz'
+            #       channel: '#alerts'
+
+          # Inhibition rules
+          inhibit_rules:
+            - source_match:
+                severity: 'critical'
+              target_match:
+                severity: 'warning'
+              equal: ['alertname']
+
+      - path: /etc/default/prometheus-alertmanager
+        permissions: '0644'
+        content: |
+          # prometheus-alertmanager configuration
+          ARGS="--config.file=/etc/prometheus/alertmanager.yml \
+            --storage.path=/var/lib/prometheus/alertmanager \
+            --web.listen-address=:9093 \
+            --cluster.listen-address=:9094"
+
+      - path: /etc/motd
+        permissions: '0644'
+        content: |
+          =====================================================
+            Prometheus Alertmanager Appliance
+            Incus Appliance Registry
+          =====================================================
+            Web UI:  http://<ip>:9093
+            Config:  /etc/prometheus/alertmanager.yml
+            Data:    /var/lib/prometheus/alertmanager/
+            Status:  systemctl status prometheus-alertmanager
+          =====================================================
+
+          Quick test:
+            curl -s localhost:9093/-/healthy
+
+          Configure Prometheus to send alerts:
+            alerting:
+              alertmanagers:
+                - static_configs:
+                    - targets: ['<alertmanager-ip>:9093']
+
+          Supports cloud-init for automated configuration.
+
+      - path: /etc/logrotate.d/prometheus-alertmanager
+        permissions: '0644'
+        content: |
+          /var/log/prometheus/*.log {
+              daily
+              missingok
+              rotate 14
+              compress
+              delaycompress
+              notifempty
+              create 0640 prometheus prometheus
+          }
+
+      - path: /etc/cloud/cloud.cfg.d/99-incus.cfg
+        permissions: '0644'
+        content: |
+          # Incus/LXD datasource configuration
+          datasource_list: [LXD]
+          datasource:
+            LXD:
+              apply_network_config: true
+
+    runcmd:
+      # Ensure directories exist with correct permissions
+      - mkdir -p /var/lib/prometheus/alertmanager
+      - mkdir -p /var/log/prometheus
+      - chown -R prometheus:prometheus /var/lib/prometheus
+      - chown -R prometheus:prometheus /var/log/prometheus
+      - chown prometheus:prometheus /etc/prometheus/alertmanager.yml
+      # Enable alertmanager at boot
+      - systemctl enable prometheus-alertmanager
+      # Disable unnecessary services for containers
+      - systemctl disable apt-daily.timer || true
+      - systemctl disable apt-daily-upgrade.timer || true
