@@ -1,0 +1,197 @@
+# config.yaml - Incus cloud-init configuration for Grafana appliance
+# This file configures the container using cloud-init
+
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    package_update: true
+    package_upgrade: false
+
+    packages:
+      # Base system
+      - ca-certificates
+      - curl
+      - tzdata
+      - logrotate
+      # Networking
+      - iproute2
+      - iputils-ping
+      # Required for Grafana repo
+      - apt-transport-https
+      - software-properties-common
+      - wget
+      - gnupg
+
+    write_files:
+      - path: /etc/grafana/grafana.ini
+        permissions: '0640'
+        content: |
+          # Grafana configuration
+          # See: https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/
+
+          [paths]
+          data = /var/lib/grafana
+          logs = /var/log/grafana
+          plugins = /var/lib/grafana/plugins
+          provisioning = /etc/grafana/provisioning
+
+          [server]
+          protocol = http
+          http_addr =
+          http_port = 3000
+          domain = localhost
+          root_url = %(protocol)s://%(domain)s:%(http_port)s/
+
+          [database]
+          type = sqlite3
+          path = grafana.db
+
+          [session]
+          provider = file
+
+          [analytics]
+          reporting_enabled = false
+          check_for_updates = false
+          check_for_plugin_updates = false
+
+          [security]
+          admin_user = admin
+          admin_password = admin
+          disable_gravatar = true
+
+          [users]
+          allow_sign_up = false
+
+          [auth.anonymous]
+          enabled = false
+
+          [log]
+          mode = console file
+          level = info
+
+          [log.file]
+          log_rotate = true
+          max_lines = 1000000
+          max_size_shift = 28
+          daily_rotate = true
+          max_days = 7
+
+      - path: /etc/grafana/provisioning/datasources/datasources.yaml
+        permissions: '0640'
+        content: |
+          # Datasource provisioning
+          # See: https://grafana.com/docs/grafana/latest/administration/provisioning/#datasources
+          apiVersion: 1
+
+          # Example datasources (uncomment and configure as needed)
+          datasources: []
+          #  - name: Prometheus
+          #    type: prometheus
+          #    access: proxy
+          #    url: http://prometheus:9090
+          #    isDefault: true
+          #    editable: false
+
+          #  - name: Loki
+          #    type: loki
+          #    access: proxy
+          #    url: http://loki:3100
+          #    editable: false
+
+      - path: /etc/grafana/provisioning/dashboards/dashboards.yaml
+        permissions: '0640'
+        content: |
+          # Dashboard provisioning
+          # See: https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
+          apiVersion: 1
+
+          providers:
+            - name: 'default'
+              orgId: 1
+              folder: ''
+              type: file
+              disableDeletion: false
+              updateIntervalSeconds: 30
+              options:
+                path: /var/lib/grafana/dashboards
+
+      - path: /etc/motd
+        permissions: '0644'
+        content: |
+          =====================================================
+            Grafana Appliance
+            Incus Appliance Registry
+          =====================================================
+            Web UI:  http://<ip>:3000
+            Config:  /etc/grafana/grafana.ini
+            Data:    /var/lib/grafana/
+            Status:  systemctl status grafana-server
+          =====================================================
+
+          Default credentials:
+            Username: admin
+            Password: admin (change on first login!)
+
+          Quick test:
+            curl -s localhost:3000/api/health
+
+          Add datasources in /etc/grafana/provisioning/datasources/
+          Add dashboards to /var/lib/grafana/dashboards/
+
+          Supports cloud-init for automated configuration.
+
+      - path: /etc/cloud/cloud.cfg.d/99-incus.cfg
+        permissions: '0644'
+        content: |
+          # Incus/LXD datasource configuration
+          datasource_list: [LXD]
+          datasource:
+            LXD:
+              apply_network_config: true
+
+      - path: /usr/local/bin/install-grafana.sh
+        permissions: '0755'
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          echo "Adding Grafana APT repository..."
+
+          # Create keyrings directory
+          mkdir -p /etc/apt/keyrings/
+
+          # Add Grafana GPG key
+          wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
+
+          # Add Grafana repository
+          echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
+
+          # Update and install
+          apt-get update
+          apt-get install -y grafana
+
+          echo "Grafana installed successfully"
+
+    runcmd:
+      # Install Grafana from official repository
+      - /usr/local/bin/install-grafana.sh
+      # Create directories
+      - mkdir -p /var/lib/grafana/dashboards
+      - mkdir -p /var/lib/grafana/plugins
+      - mkdir -p /var/log/grafana
+      - mkdir -p /etc/grafana/provisioning/datasources
+      - mkdir -p /etc/grafana/provisioning/dashboards
+      - mkdir -p /etc/grafana/provisioning/notifiers
+      - mkdir -p /etc/grafana/provisioning/alerting
+      - mkdir -p /etc/grafana/provisioning/plugins
+      # Set ownership
+      - chown -R grafana:grafana /var/lib/grafana
+      - chown -R grafana:grafana /var/log/grafana
+      - chown -R root:grafana /etc/grafana
+      - chmod 640 /etc/grafana/grafana.ini
+      # Enable Grafana at boot
+      - systemctl daemon-reload
+      - systemctl enable grafana-server
+      # Disable unnecessary services for containers
+      - systemctl disable apt-daily.timer || true
+      - systemctl disable apt-daily-upgrade.timer || true

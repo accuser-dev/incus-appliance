@@ -52,3 +52,7 @@ appliances:
   - name: loki
     description: Grafana Loki log aggregation system
     # Version: defined in appliances/loki/appliance.yaml
+
+  - name: grafana
+    description: Grafana observability and visualization platform
+    # Version: defined in appliances/grafana/appliance.yaml
