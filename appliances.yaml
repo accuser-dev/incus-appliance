@@ -40,3 +40,7 @@ appliances:
   - name: cloudflared
     description: Cloudflare Tunnel client for secure tunneling
     # Version: defined in appliances/cloudflared/appliance.yaml
+
+  - name: alertmanager
+    description: Prometheus Alertmanager for alert handling and routing
+    # Version: defined in appliances/alertmanager/appliance.yaml
