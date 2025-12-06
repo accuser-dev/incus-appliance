@@ -44,3 +44,7 @@ appliances:
   - name: alertmanager
     description: Prometheus Alertmanager for alert handling and routing
     # Version: defined in appliances/alertmanager/appliance.yaml
+
+  - name: prometheus
+    description: Prometheus monitoring system and time series database
+    # Version: defined in appliances/prometheus/appliance.yaml

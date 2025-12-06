@@ -1,0 +1,184 @@
+# config.yaml - Incus cloud-init configuration for Prometheus appliance
+# This file configures the container using cloud-init
+
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    package_update: true
+    package_upgrade: false
+
+    packages:
+      # Base system
+      - ca-certificates
+      - curl
+      - tzdata
+      - logrotate
+      # Networking
+      - iproute2
+      - iputils-ping
+      # Prometheus
+      - prometheus
+
+    # Prevent services from starting during package installation
+    # This file is removed in runcmd after permissions are fixed
+    bootcmd:
+      - mkdir -p /usr/sbin
+      - 'printf "#!/bin/sh\nexit 101\n" > /usr/sbin/policy-rc.d'
+      - chmod +x /usr/sbin/policy-rc.d
+
+    write_files:
+      - path: /etc/prometheus/prometheus.yml
+        permissions: '0644'
+        content: |
+          # Prometheus configuration
+          # See: https://prometheus.io/docs/prometheus/latest/configuration/configuration/
+
+          global:
+            # How frequently to scrape targets
+            scrape_interval: 15s
+            # How frequently to evaluate rules
+            evaluation_interval: 15s
+            # Attach labels to time series and alerts
+            external_labels:
+              monitor: 'incus-appliance'
+
+          # Alertmanager configuration (uncomment to enable)
+          # alerting:
+          #   alertmanagers:
+          #     - static_configs:
+          #         - targets:
+          #           - alertmanager:9093
+
+          # Rule files (uncomment to enable)
+          # rule_files:
+          #   - /etc/prometheus/rules/*.yml
+
+          # Scrape configurations
+          scrape_configs:
+            # Prometheus self-monitoring
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            # Example: Scrape node exporters
+            # - job_name: 'node'
+            #   static_configs:
+            #     - targets:
+            #       - 'node-exporter-1:9100'
+            #       - 'node-exporter-2:9100'
+
+            # Example: Service discovery with file
+            # - job_name: 'file_sd'
+            #   file_sd_configs:
+            #     - files:
+            #       - /etc/prometheus/targets/*.yml
+            #       refresh_interval: 30s
+
+      - path: /etc/default/prometheus
+        permissions: '0644'
+        content: |
+          # prometheus configuration
+          ARGS="--config.file=/etc/prometheus/prometheus.yml \
+            --storage.tsdb.path=/var/lib/prometheus/metrics2 \
+            --storage.tsdb.retention.time=15d \
+            --web.listen-address=:9090 \
+            --web.enable-lifecycle"
+
+      - path: /etc/prometheus/rules/example.yml.disabled
+        permissions: '0644'
+        content: |
+          # Example alerting rules
+          # Rename to example.yml and uncomment rule_files in prometheus.yml to enable
+          groups:
+            - name: example
+              rules:
+                - alert: InstanceDown
+                  expr: up == 0
+                  for: 5m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "Instance {{ $labels.instance }} down"
+                    description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 5 minutes."
+
+                - alert: HighCPUUsage
+                  expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High CPU usage on {{ $labels.instance }}"
+                    description: "CPU usage is above 80% for more than 5 minutes."
+
+      - path: /etc/motd
+        permissions: '0644'
+        content: |
+          =====================================================
+            Prometheus Appliance
+            Incus Appliance Registry
+          =====================================================
+            Web UI:  http://<ip>:9090
+            Config:  /etc/prometheus/prometheus.yml
+            Data:    /var/lib/prometheus/metrics2/
+            Status:  systemctl status prometheus
+          =====================================================
+
+          Quick test:
+            curl -s localhost:9090/-/healthy
+
+          Add scrape targets to /etc/prometheus/prometheus.yml:
+            scrape_configs:
+              - job_name: 'my-app'
+                static_configs:
+                  - targets: ['app:8080']
+
+          Supports cloud-init for automated configuration.
+
+      - path: /etc/logrotate.d/prometheus
+        permissions: '0644'
+        content: |
+          /var/log/prometheus/*.log {
+              daily
+              missingok
+              rotate 14
+              compress
+              delaycompress
+              notifempty
+              create 0640 prometheus prometheus
+          }
+
+      - path: /etc/cloud/cloud.cfg.d/99-incus.cfg
+        permissions: '0644'
+        content: |
+          # Incus/LXD datasource configuration
+          datasource_list: [LXD]
+          datasource:
+            LXD:
+              apply_network_config: true
+
+      - path: /etc/systemd/system/prometheus.service.d/cloud-init.conf
+        permissions: '0644'
+        content: |
+          # Wait for cloud-init to complete before starting prometheus
+          [Unit]
+          After=cloud-final.service
+          Wants=cloud-final.service
+
+    runcmd:
+      # Remove policy-rc.d that prevented services from starting during install
+      - rm -f /usr/sbin/policy-rc.d
+      # Create and set correct ownership on directories
+      - mkdir -p /var/lib/prometheus/metrics2
+      - mkdir -p /var/log/prometheus
+      - mkdir -p /etc/prometheus/rules
+      - mkdir -p /etc/prometheus/targets
+      - chown -R prometheus:prometheus /var/lib/prometheus
+      - chown -R prometheus:prometheus /var/log/prometheus
+      - chown -R prometheus:prometheus /etc/prometheus
+      # Reload systemd to pick up the override
+      - systemctl daemon-reload
+      # Enable prometheus at boot (will start on next reboot after image build)
+      - systemctl enable prometheus
+      # Disable unnecessary services for containers
+      - systemctl disable apt-daily.timer || true
+      - systemctl disable apt-daily-upgrade.timer || true
