@@ -1,0 +1,62 @@
+# appliance.yaml - Appliance metadata
+name: prometheus
+version: "2.42.1"
+description: "Prometheus monitoring system and time series database"
+maintainer: "Incus Appliance Registry"
+
+# Supported architectures
+architectures:
+  - amd64
+  - arm64
+
+# Supported instance types
+types:
+  - container
+
+# Base distribution
+base:
+  distribution: debian
+  release: bookworm
+
+# cloud-init support
+cloud_init: true
+
+# Resource requirements (informational)
+requirements:
+  min_cpu: 1
+  min_memory: 256MB
+  min_disk: 1GB
+  recommended_memory: 1GB
+  recommended_disk: 10GB
+
+# Exposed ports (informational)
+ports:
+  - port: 9090
+    protocol: tcp
+    description: Web UI and API
+
+# Volumes that should be persisted
+volumes:
+  - path: /var/lib/prometheus/metrics2
+    description: "Time series database"
+
+# Health check command
+healthcheck:
+  command: "curl -sf http://localhost:9090/-/healthy >/dev/null || exit 1"
+  interval: 30s
+  timeout: 5s
+  retries: 3
+
+# Tags for filtering
+tags:
+  - monitoring
+  - metrics
+  - time-series
+  - observability
+  - prometheus
+
+# Related appliances
+see_also:
+  - alertmanager
+  - grafana
+  - node-exporter
