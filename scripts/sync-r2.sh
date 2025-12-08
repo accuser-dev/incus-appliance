@@ -122,7 +122,7 @@ upload_metadata() {
     # Upload directory listing HTML files
     if [[ -d "${REGISTRY_DIR}/images" ]]; then
         find "${REGISTRY_DIR}/images" -name "index.html" | while read -r html_file; do
-            rel_path="${html_file#${REGISTRY_DIR}/}"
+            rel_path="${html_file#"${REGISTRY_DIR}"/}"
             dir_path=$(dirname "$rel_path")
             rclone copy "$html_file" "r2:${R2_BUCKET}/${dir_path}/" \
                 --header-upload "Cache-Control: public, max-age=300" \
