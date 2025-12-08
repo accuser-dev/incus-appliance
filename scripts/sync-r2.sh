@@ -50,6 +50,7 @@ secret_access_key = ${R2_SECRET_ACCESS_KEY}
 endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 acl = private
 EOF
+    chmod 600 ~/.config/rclone/rclone.conf
 
     log_info "rclone configured"
 }
@@ -110,6 +111,7 @@ upload_metadata() {
     fi
 
     # Upload index.html and other root files
+    shopt -s nullglob
     for file in "${REGISTRY_DIR}"/*.html; do
         if [[ -f "$file" ]]; then
             rclone copy "$file" "r2:${R2_BUCKET}/" \
@@ -118,6 +120,7 @@ upload_metadata() {
             log_info "  Uploaded $(basename "$file")"
         fi
     done
+    shopt -u nullglob
 
     # Upload directory listing HTML files
     if [[ -d "${REGISTRY_DIR}/images" ]]; then
